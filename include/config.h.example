@@ -1,0 +1,32 @@
+#include <Arduino.h>
+
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// OpenTherm slave
+// https://www.tindie.com/products/thehognl/opentherm-slave-shield-for-wemoslolin/
+const int PIN_OT_SLAVE_IN  = D2;
+const int PIN_OT_SLAVE_OUT = D1;
+
+// OpenTherm master
+// https://www.tindie.com/products/thehognl/opentherm-master-shield-for-wemoslolin/
+const int PIN_OT_MASTER_IN  = D6;
+const int PIN_OT_MASTER_OUT = D5;
+
+// WiFi
+const char *WIFI_SSID     = "";
+const char *WIFI_PASSWORD = "";
+
+// MQTT
+const char* MQTT_SERVER      = "";
+const int   MQTT_PORT        = 1883;
+const char* MQTT_USER        = "";
+const char* MQTT_PASSWORD    = "";
+const char* MQTT_DEVICE_ID   = "opentherm_optimizer";
+const char* MQTT_STATE_TOPIC = "opentherm_optimizer/state";
+const char* MQTT_LOG_TOPIC   = "opentherm_optimizer/log";
+
+// Home Automation MQTT
+const char* HA_MQTT_DISCOVERY_TOPIC = "homeassistant/device/opentherm_optimizer/config";
+
+#endif
