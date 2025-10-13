@@ -27,6 +27,22 @@ const char* HA_MQTT_DISCOVERY_PAYLOAD = R"(
             "unique_id": "oo_ch_enable",
             "state_topic": "opentherm_optimizer/state"
         },
+        "oo_ch_mode": {
+            "p": "binary_sensor",
+            "name": "CH mode",
+            "device_class": null,
+            "value_template": "{{ value_json.ch_mode}}",
+            "unique_id": "oo_ch_mode",
+            "state_topic": "opentherm_optimizer/state"
+        },
+        "oo_flame_status": {
+            "p": "binary_sensor",
+            "name": "Flame status",
+            "device_class": null,
+            "value_template": "{{ value_json.flame_status}}",
+            "unique_id": "oo_flame_status",
+            "state_topic": "opentherm_optimizer/state"
+        },
         "oo_tset": {
             "p": "sensor",
             "name": "Control setpoint",

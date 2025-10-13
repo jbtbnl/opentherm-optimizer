@@ -21,6 +21,14 @@ struct OpenThermState {
     false, // initial value
     10 // transition delay in seconds
   );
+  DampenedBoolValue chMode = DampenedBoolValue(
+    false, // initial value
+    10 // transition delay in seconds
+  );
+  DampenedBoolValue flameStatus = DampenedBoolValue(
+    false, // initial value
+    10 // transition delay in seconds
+  );
   float tSet = 0;
   float tRoom = 0;
   float tRoomSet = 0;
@@ -73,11 +81,29 @@ void eavesdropOnRequest(unsigned long request) {
   }
 }
 
+void eavesdropOnResponse(unsigned long response) {
+  OpenThermMessageID messageId = sOT.getDataID(response);
+
+  switch (messageId) {
+    case OpenThermMessageID::Status: { // ID: 0, Master and Slave Status flags
+      uint8_t slaveStatusFlags = sOT.getUInt(response) & 0xFF;
+      otState.chMode.setTarget((slaveStatusFlags & 0x2) != 0);
+      otState.flameStatus.setTarget((slaveStatusFlags & 0x8) != 0);
+      break;
+    }
+    default: {} // To prevent "enumeration value ... not handled" warnings
+  }
+}
+
 unsigned long tamperWithRequest(unsigned long request) {
   OpenThermMessageID messageId = sOT.getDataID(request);
   unsigned long tamperedRequest = request;
 
   switch (messageId) {
+    case OpenThermMessageID::Status: {
+      // Overwrite CH enable bit with dampened value
+      tamperedRequest = (tamperedRequest & ~1) | (otState.chEnable.get() ? 1 : 0);
+    }
     case OpenThermMessageID::TSet: { // ID: 1, Control setpoint  ie CH  water temperature setpoint (°C)
       float tSet = sOT.getFloat(request);
       if (tSet >= 30) {
@@ -143,9 +169,11 @@ void processRequest(unsigned long request, OpenThermResponseStatus status) {
 
     logFrame("Sending:  ", tamperedRequest);
     unsigned long response = mOT.sendRequest(tamperedRequest); // forward tampered request to slave
-    if (response) {
-      sOT.sendResponse(response); // send response back to master
+    if (mOT.isValidResponse(response)) {
       logFrame("Slave:    ", response);
+      eavesdropOnResponse(response);
+
+      sOT.sendResponse(response); // send response back to master
     }
   } else {
     logFrame("Invalid:  ", request);
@@ -201,6 +229,8 @@ void loop() {
       char buffer[256];
 
       doc["ch_enable"] = otState.chEnable.get() ? "ON" : "OFF";
+      doc["ch_mode"] = otState.chMode.get() ? "ON" : "OFF";
+      doc["flame_status"] = otState.flameStatus.get() ? "ON" : "OFF";
       doc["tset"] = otState.tSet;
       doc["tr"] = otState.tRoom;
       doc["trset"] = otState.tRoomSet;
