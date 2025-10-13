@@ -3,22 +3,32 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <Arduino.h>
+#include <math.h>
 #include <OpenTherm.h>
 
 // from ./include
 #include <config.h>
 #include <ha_mqtt_discovery_payload.h>
+#include <SmoothedFloatValue.h>
+#include <DampenedBoolValue.h>
 
 const int MQTT_BUFFER_SIZE = 4096; // Should be large enough to accomodate HA MQTT discovery payload
 
 unsigned long mqttLastPublished;
 
 struct OpenThermState {
-  bool chEnable = false;
+  DampenedBoolValue chEnable = DampenedBoolValue(
+    false, // initial value
+    10 // transition delay in seconds
+  );
   float tSet = 0;
   float tRoom = 0;
   float tRoomSet = 0;
-  float tSetTampered = 0;
+  SmoothedFloatValue tSetTampered = SmoothedFloatValue(
+    10, // initial value
+    1.0f / 60.0f, // upward rate: 1 degree step per 60 seconds
+    1.0f / 20.0f // downward rate: 1 degree step per 20 seconds
+  );
 } otState;
 
 WiFiClient wifiClient;
@@ -44,7 +54,7 @@ void eavesdropOnRequest(unsigned long request) {
   switch (messageId) {
     case OpenThermMessageID::Status: { // ID: 0, Master and Slave Status flags
       uint8_t masterStatusFlags = sOT.getUInt(request) >> 8;
-      otState.chEnable = (masterStatusFlags & 0x1) != 0;
+      otState.chEnable.setTarget((masterStatusFlags & 0x1) != 0);
       break;
     }
     case OpenThermMessageID::TSet: { // ID: 1, Control setpoint  ie CH  water temperature setpoint (°C)
@@ -70,12 +80,25 @@ unsigned long tamperWithRequest(unsigned long request) {
   switch (messageId) {
     case OpenThermMessageID::TSet: { // ID: 1, Control setpoint  ie CH  water temperature setpoint (°C)
       float tSet = sOT.getFloat(request);
-      if (tSet > 30) {
-        otState.tSetTampered = ((tSet - 30) / 2) + 30;
+      if (tSet >= 30) {
+        if (otState.tSetTampered.get() < 25) {
+          // make sure that it doesn't take too long
+          otState.tSetTampered.reset(25);
+        }
+        // from 30 degrees: reduce setpoint (lineair scale down)
+        otState.tSetTampered.setTarget(((tSet - 30) / 2) + 30);
+      } else if (tSet >= 25) {
+        if (otState.tSetTampered.get() < 20) {
+          // make sure that it doesn't take too long
+          otState.tSetTampered.reset(20);
+        }
+        // from 25 till 30 degrees: use setpoint as it is
+        otState.tSetTampered.setTarget(tSet);
       } else {
-        otState.tSetTampered = tSet;
+        // below 25 degrees: disregard setpoint (override with 10 degrees)
+        otState.tSetTampered.setTarget(10);
       }
-      tamperedRequest = sOT.buildSetBoilerTemperatureRequest(otState.tSetTampered);
+      tamperedRequest = sOT.buildSetBoilerTemperatureRequest(otState.tSetTampered.get());
       break;
     }
     default: {} // To prevent "enumeration value ... not handled" warnings
@@ -177,11 +200,11 @@ void loop() {
       JsonDocument doc;
       char buffer[256];
 
-      doc["ch_enable"] = otState.chEnable ? "ON" : "OFF";
+      doc["ch_enable"] = otState.chEnable.get() ? "ON" : "OFF";
       doc["tset"] = otState.tSet;
       doc["tr"] = otState.tRoom;
       doc["trset"] = otState.tRoomSet;
-      doc["tset_tampered"] = otState.tSetTampered;
+      doc["tset_tampered"] = round(otState.tSetTampered.get());
 
       serializeJson(doc, buffer);
 
