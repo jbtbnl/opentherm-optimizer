@@ -96,13 +96,18 @@ void eavesdropOnResponse(unsigned long response) {
 }
 
 unsigned long tamperWithRequest(unsigned long request) {
+  OpenThermMessageType messageType = sOT.getMessageType(request);
   OpenThermMessageID messageId = sOT.getDataID(request);
   unsigned long tamperedRequest = request;
 
   switch (messageId) {
     case OpenThermMessageID::Status: {
       // Overwrite CH enable bit with dampened value
-      tamperedRequest = (tamperedRequest & ~1) | (otState.chEnable.get() ? 1 : 0);
+      uint16_t statusFlags = sOT.getUInt(request);
+      statusFlags = (statusFlags & ~(1 << 8)) | (otState.chEnable.get() ? (1 << 8) : 0);
+
+      tamperedRequest = sOT.buildRequest(messageType, messageId, statusFlags);
+      break;
     }
     case OpenThermMessageID::TSet: { // ID: 1, Control setpoint  ie CH  water temperature setpoint (°C)
       float tSet = sOT.getFloat(request);
@@ -169,7 +174,7 @@ void processRequest(unsigned long request, OpenThermResponseStatus status) {
 
     logFrame("Sending:  ", tamperedRequest);
     unsigned long response = mOT.sendRequest(tamperedRequest); // forward tampered request to slave
-    if (mOT.isValidResponse(response)) {
+    if (response && mOT.isValidResponse()) {
       logFrame("Slave:    ", response);
       eavesdropOnResponse(response);
 
