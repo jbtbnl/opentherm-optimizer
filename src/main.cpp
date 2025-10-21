@@ -32,7 +32,8 @@ struct OpenThermState {
   float tSet = 0;
   float tRoom = 0;
   float tRoomSet = 0;
-  SmoothedFloatValue tSetTampered = SmoothedFloatValue(
+  bool chEnableOptimized = false;
+  SmoothedFloatValue tSetOptimized = SmoothedFloatValue(
     10, // initial value
     1.0f / 60.0f, // upward rate: 1 degree step per 60 seconds
     1.0f / 20.0f // downward rate: 1 degree step per 20 seconds
@@ -95,47 +96,51 @@ void eavesdropOnResponse(unsigned long response) {
   }
 }
 
-unsigned long tamperWithRequest(unsigned long request) {
+unsigned long optimizeRequest(unsigned long request) {
   OpenThermMessageType messageType = sOT.getMessageType(request);
   OpenThermMessageID messageId = sOT.getDataID(request);
-  unsigned long tamperedRequest = request;
+  unsigned long optimizedRequest = request;
 
   switch (messageId) {
-    case OpenThermMessageID::Status: {
-      // Overwrite CH enable bit with dampened value
+    case OpenThermMessageID::Status: { // ID: 0, Master and Slave Status flags
       uint16_t statusFlags = sOT.getUInt(request);
-      statusFlags = (statusFlags & ~(1 << 8)) | (otState.chEnable.get() ? (1 << 8) : 0);
 
-      tamperedRequest = sOT.buildRequest(messageType, messageId, statusFlags);
+      // Disregard chEnable when tSet is less then 20 degrees
+      otState.chEnableOptimized = otState.chEnable.get() && otState.tSetOptimized.get() >= 20;
+      
+      // Overwrite CH enable bit with optimized value
+      statusFlags = (statusFlags & ~(1 << 8)) | (otState.chEnableOptimized ? (1 << 8) : 0);
+
+      optimizedRequest = sOT.buildRequest(messageType, messageId, statusFlags);
       break;
     }
-    case OpenThermMessageID::TSet: { // ID: 1, Control setpoint  ie CH  water temperature setpoint (°C)
+    case OpenThermMessageID::TSet: { // ID: 1, Control setpoint ie CH water temperature setpoint (°C)
       float tSet = sOT.getFloat(request);
       if (tSet >= 30) {
-        if (otState.tSetTampered.get() < 25) {
+        if (otState.tSetOptimized.get() < 25) {
           // make sure that it doesn't take too long
-          otState.tSetTampered.reset(25);
+          otState.tSetOptimized.reset(25);
         }
         // from 30 degrees: reduce setpoint (lineair scale down)
-        otState.tSetTampered.setTarget(((tSet - 30) / 2) + 30);
+        otState.tSetOptimized.setTarget(((tSet - 30) / 2) + 30);
       } else if (tSet >= 25) {
-        if (otState.tSetTampered.get() < 20) {
+        if (otState.tSetOptimized.get() < 20) {
           // make sure that it doesn't take too long
-          otState.tSetTampered.reset(20);
+          otState.tSetOptimized.reset(20);
         }
         // from 25 till 30 degrees: use setpoint as it is
-        otState.tSetTampered.setTarget(tSet);
+        otState.tSetOptimized.setTarget(tSet);
       } else {
         // below 25 degrees: disregard setpoint (override with 10 degrees)
-        otState.tSetTampered.setTarget(10);
+        otState.tSetOptimized.setTarget(10);
       }
-      tamperedRequest = sOT.buildSetBoilerTemperatureRequest(otState.tSetTampered.get());
+      optimizedRequest = sOT.buildSetBoilerTemperatureRequest(otState.tSetOptimized.get());
       break;
     }
     default: {} // To prevent "enumeration value ... not handled" warnings
   }
 
-  return tamperedRequest;
+  return optimizedRequest;
 }
 
 String frameToBinaryString(unsigned long frame) {
@@ -164,24 +169,24 @@ void logFrame(String frameType, unsigned long frame) {
 
 void processRequest(unsigned long request, OpenThermResponseStatus status) {
   if (sOT.isValidRequest(request)) {
-    logFrame("Master:   ", request);
+    logFrame("Master:    ", request);
     eavesdropOnRequest(request);
 
-    unsigned long tamperedRequest = tamperWithRequest(request);
-    if (request != tamperedRequest) {
-      logFrame("Tampered: ", tamperedRequest);
+    unsigned long optimizedRequest = optimizeRequest(request);
+    if (request != optimizedRequest) {
+      logFrame("Optimized: ", optimizedRequest);
     }
 
-    logFrame("Sending:  ", tamperedRequest);
-    unsigned long response = mOT.sendRequest(tamperedRequest); // forward tampered request to slave
+    logFrame("Sending:   ", optimizedRequest);
+    unsigned long response = mOT.sendRequest(optimizedRequest); // forward optimized request to slave
     if (response) {
-      logFrame("Slave:    ", response);
+      logFrame("Slave:     ", response);
       eavesdropOnResponse(response);
 
       sOT.sendResponse(response); // send response back to master
     }
   } else {
-    logFrame("Invalid:  ", request);
+    logFrame("Invalid:   ", request);
   }
 
   Serial.println();
@@ -239,7 +244,8 @@ void loop() {
       doc["tset"] = otState.tSet;
       doc["tr"] = otState.tRoom;
       doc["trset"] = otState.tRoomSet;
-      doc["tset_tampered"] = round(otState.tSetTampered.get());
+      doc["ch_enable_optimized"] = otState.chEnableOptimized ? "ON" : "OFF";
+      doc["tset_optimized"] = round(otState.tSetOptimized.get());
 
       serializeJson(doc, buffer);
 
