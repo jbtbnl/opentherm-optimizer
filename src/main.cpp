@@ -174,7 +174,7 @@ void processRequest(unsigned long request, OpenThermResponseStatus status) {
 
     logFrame("Sending:  ", tamperedRequest);
     unsigned long response = mOT.sendRequest(tamperedRequest); // forward tampered request to slave
-    if (response && mOT.isValidResponse()) {
+    if (response) {
       logFrame("Slave:    ", response);
       eavesdropOnResponse(response);
 
