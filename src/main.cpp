@@ -11,8 +11,9 @@
 #include <ha_mqtt_discovery_payload.h>
 #include <SmoothedFloatValue.h>
 #include <DampenedBoolValue.h>
+#include <Stopwatch.h>
 
-const int MQTT_BUFFER_SIZE = 4096; // Should be large enough to accomodate HA MQTT discovery payload
+const int MQTT_BUFFER_SIZE = 6000; // Should be large enough to accomodate HA MQTT discovery payload
 
 unsigned long mqttLastPublished;
 
@@ -32,6 +33,9 @@ struct OpenThermState {
   float tSet = 0;
   float tRoom = 0;
   float tRoomSet = 0;
+  float tBoiler = 0;
+  float tOutside = 0;
+  float tRet = 0;
   bool chEnableOptimized = false;
   SmoothedFloatValue tSetOptimized = SmoothedFloatValue(
     10, // initial value
@@ -39,6 +43,11 @@ struct OpenThermState {
     1.0f / 20.0f // downward rate: 1 degree step per 20 seconds
   );
 } otState;
+
+struct HeatpumpState {
+  unsigned long lastHeatingCycleDuration = 0;
+  Stopwatch heatingStopwatch = Stopwatch();
+} heatpumpState;
 
 WiFiClient wifiClient;
 
@@ -90,6 +99,18 @@ void eavesdropOnResponse(unsigned long response) {
       uint8_t slaveStatusFlags = sOT.getUInt(response) & 0xFF;
       otState.chMode.setTarget((slaveStatusFlags & 0x2) != 0);
       otState.flameStatus.setTarget((slaveStatusFlags & 0x8) != 0);
+      break;
+    }
+    case OpenThermMessageID::Tboiler: { // ID: 25, Boiler flow water temperature (°C)
+      otState.tBoiler = sOT.getFloat(response);
+      break;
+    }
+    case OpenThermMessageID::Toutside: { // ID: 27, Outside temperature (°C)
+      otState.tOutside = sOT.getFloat(response);
+      break;
+    }
+    case OpenThermMessageID::Tret: { // ID: 28, Return water temperature (°C)
+      otState.tRet = sOT.getFloat(response);
       break;
     }
     default: {} // To prevent "enumeration value ... not handled" warnings
@@ -244,8 +265,14 @@ void loop() {
       doc["tset"] = otState.tSet;
       doc["tr"] = otState.tRoom;
       doc["trset"] = otState.tRoomSet;
+      doc["tboiler"] = otState.tBoiler;
+      doc["toutside"] = otState.tOutside;
+      doc["tret"] = otState.tRet;
       doc["ch_enable_optimized"] = otState.chEnableOptimized ? "ON" : "OFF";
       doc["tset_optimized"] = round(otState.tSetOptimized.get());
+      if (heatpumpState.lastHeatingCycleDuration != 0) {
+        doc["last_heating_cycle_duration"] = heatpumpState.lastHeatingCycleDuration;
+      }
 
       serializeJson(doc, buffer);
 
@@ -261,6 +288,14 @@ void loop() {
   }
   else {
     Serial.println("WiFi:     Disconnected");
+  }
+
+  if (otState.flameStatus.get() && !heatpumpState.heatingStopwatch.isRunning()) {
+    heatpumpState.heatingStopwatch.reset();
+    heatpumpState.heatingStopwatch.start();
+  } else if (!otState.flameStatus.get() && heatpumpState.heatingStopwatch.isRunning()) {
+    heatpumpState.heatingStopwatch.stop();
+    heatpumpState.lastHeatingCycleDuration = heatpumpState.heatingStopwatch.getElapsedSeconds();
   }
 
   sOT.process();

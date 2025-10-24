@@ -70,6 +70,33 @@ const char* HA_MQTT_DISCOVERY_PAYLOAD = R"(
             "unique_id": "oo_trset",
             "state_topic": "opentherm_optimizer/state"
         },
+        "oo_tboiler": {
+            "p": "sensor",
+            "name": "Boiler flow water temperature",
+            "device_class": "temperature",
+            "unit_of_measurement": "°C",
+            "value_template": "{{ value_json.tboiler}}",
+            "unique_id": "oo_tboiler",
+            "state_topic": "opentherm_optimizer/state"
+        },
+        "oo_toutside": {
+            "p": "sensor",
+            "name": "Outside temperature",
+            "device_class": "temperature",
+            "unit_of_measurement": "°C",
+            "value_template": "{{ value_json.toutside}}",
+            "unique_id": "oo_toutside",
+            "state_topic": "opentherm_optimizer/state"
+        },
+        "oo_tret": {
+            "p": "sensor",
+            "name": "Return water temperature",
+            "device_class": "temperature",
+            "unit_of_measurement": "°C",
+            "value_template": "{{ value_json.tret}}",
+            "unique_id": "oo_tret",
+            "state_topic": "opentherm_optimizer/state"
+        },
         "oo_ch_enable_optimized": {
             "p": "binary_sensor",
             "name": "Optimized CH enable",
@@ -85,6 +112,15 @@ const char* HA_MQTT_DISCOVERY_PAYLOAD = R"(
             "unit_of_measurement": "°C",
             "value_template": "{{ value_json.tset_optimized}}",
             "unique_id": "oo_tset_optimized",
+            "state_topic": "opentherm_optimizer/state"
+        },
+        "oo_last_heating_cycle_duration": {
+            "p": "sensor",
+            "name": "Last heating cycle duration",
+            "device_class": "duration",
+            "unit_of_measurement": "s",
+            "value_template": "{{ value_json.last_heating_cycle_duration}}",
+            "unique_id": "oo_last_heating_cycle_duration",
             "state_topic": "opentherm_optimizer/state"
         }
     },
